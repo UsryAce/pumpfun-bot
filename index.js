@@ -1,4 +1,4 @@
-const axios = require("axios");
+import axios from "axios";
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
@@ -53,14 +53,14 @@ async function checkMintActivity() {
     if (!tokenChange) return;
 
     const owner = tokenChange.owner;
-    const postAmount = parseFloat(tokenChange.uiTokenAmount.uiAmount || 0);
+    const postAmount = Number(tokenChange.uiTokenAmount.uiAmount || 0);
 
     const preBalanceObj = preBalances.find(
       b => b.owner === owner && b.mint === TOKEN_MINT
     );
 
     const preAmount = preBalanceObj
-      ? parseFloat(preBalanceObj.uiTokenAmount.uiAmount || 0)
+      ? Number(preBalanceObj.uiTokenAmount.uiAmount || 0)
       : 0;
 
     const tokenBought = postAmount - preAmount;
