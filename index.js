@@ -6,20 +6,20 @@ app.use(express.json());
 
 const RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
-// ==========================
-// Whale Tier Logic
-// ==========================
+// =============================
+// Whale Tier System
+// =============================
 function getWhaleTier(sol) {
-  if (sol >= 10) return "🐳 MEGA WHALE";
-  if (sol >= 5) return "🐋 WHALE";
-  if (sol >= 1) return "🐬 DOLPHIN";
-  if (sol >= 0.5) return "🐟 FISH";
+  if (sol >= 20) return "🐳 MEGA WHALE";
+  if (sol >= 10) return "🐋 WHALE";
+  if (sol >= 5) return "🐬 DOLPHIN";
+  if (sol >= 1) return "🐟 FISH";
   return "🦐 SHRIMP";
 }
 
-// ==========================
+// =============================
 // Get Total Supply
-// ==========================
+// =============================
 async function getTotalSupply() {
   try {
     const res = await axios.post(RPC, {
@@ -29,15 +29,15 @@ async function getTotalSupply() {
       params: [process.env.TOKEN_MINT]
     });
 
-    return res.data.result.value.uiAmount;
+    return Number(res.data.result.value.uiAmount);
   } catch {
     return 0;
   }
 }
 
-// ==========================
-// Get Top 10 Holders
-// ==========================
+// =============================
+// Get Top Holders (clean list)
+// =============================
 async function getTopHolders() {
   try {
     const res = await axios.post(RPC, {
@@ -48,7 +48,7 @@ async function getTopHolders() {
     });
 
     return res.data.result.value
-      .slice(0, 10)
+      .slice(0, 5) // reduced to 5 for cleaner embed
       .map((h, i) =>
         `#${i + 1} ${h.address.slice(0,4)}...${h.address.slice(-4)}`
       )
@@ -59,9 +59,9 @@ async function getTopHolders() {
   }
 }
 
-// ==========================
-// Webhook
-// ==========================
+// =============================
+// Webhook Listener
+// =============================
 app.post("/webhook", async (req, res) => {
   try {
     const tx = req.body[0];
@@ -74,19 +74,29 @@ app.post("/webhook", async (req, res) => {
     if (!transfer) return res.sendStatus(200);
 
     const buyer = transfer.toUserAccount;
-    const tokens = transfer.tokenAmount;
+    const tokens = Number(transfer.tokenAmount);
     const signature = tx.signature;
 
-    // ===== SOL CALCULATION =====
+    // =============================
+    // SOL DETECTION (Bonded Safe)
+    // =============================
     let sol = 0;
 
-    if (tx.nativeTransfers && tx.nativeTransfers.length > 0) {
-      const buyerPayment = tx.nativeTransfers.find(
+    // Case 1: Normal native transfer
+    if (tx.nativeTransfers?.length) {
+      const solTransfer = tx.nativeTransfers.find(
         t => t.fromUserAccount === buyer
       );
+      if (solTransfer) {
+        sol = solTransfer.amount / 1e9;
+      }
+    }
 
-      if (buyerPayment) {
-        sol = buyerPayment.amount / 1e9;
+    // Case 2: Swap event (Raydium)
+    if (sol === 0 && tx.events?.swap) {
+      const swap = tx.events.swap;
+      if (swap.nativeInput?.amount) {
+        sol = swap.nativeInput.amount / 1e9;
       }
     }
 
@@ -96,10 +106,17 @@ app.post("/webhook", async (req, res) => {
 
     const whaleTier = getWhaleTier(sol);
 
-    // ===== MARKET CAP =====
+    // =============================
+    // MARKET CAP FIX
+    // =============================
     const totalSupply = await getTotalSupply();
-    const pricePerToken = sol / tokens;
-    const marketCap = totalSupply * pricePerToken;
+
+    let marketCap = 0;
+
+    if (tokens > 0 && totalSupply > 0) {
+      const pricePerToken = sol / tokens;
+      marketCap = totalSupply * pricePerToken;
+    }
 
     const holders = await getTopHolders();
 
@@ -125,7 +142,9 @@ app.post("/webhook", async (req, res) => {
           },
           {
             name: "Market Cap",
-            value: `$${Math.round(marketCap).toLocaleString()}`,
+            value: marketCap > 0
+              ? `$${Math.round(marketCap).toLocaleString()}`
+              : "Calculating...",
             inline: true
           },
           {
@@ -133,7 +152,7 @@ app.post("/webhook", async (req, res) => {
             value: `https://solscan.io/tx/${signature}`
           },
           {
-            name: "🏆 Top 10 Holders",
+            name: "Top Holders",
             value: holders
           }
         ],
@@ -151,5 +170,5 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 Pump.fun bot running...");
+  console.log("🚀 Pump.fun bonded bot running...");
 });
