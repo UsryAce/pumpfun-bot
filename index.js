@@ -1,89 +1,47 @@
+import express from "express";
 import axios from "axios";
 
-const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
+const app = express();
+app.use(express.json());
+
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
 const TOKEN_MINT = process.env.TOKEN_MINT;
 
-const PUMP_FUN_PROGRAM = "FK4DHfaBsYZnznVnZcNjFmJYmwHuw1tNmjMCmHrNpump";
+console.log("🚀 Pump.fun Webhook Bot Running");
 
-console.log("🚀 Pump.fun Bot Started (Program Scanner)");
-
-let processed = new Set();
-
-async function scanProgram() {
-  console.log("Scanning program...");
-
+app.post("/webhook", async (req, res) => {
   try {
-    const sigRes = await axios.post(
-      `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getSignaturesForAddress",
-        params: [PUMP_FUN_PROGRAM, { limit: 20 }]
-      }
-    );
+    const transactions = req.body;
 
-    const signatures = sigRes.data.result;
-    if (!signatures.length) return;
+    for (const tx of transactions) {
+      if (!tx.tokenTransfers) continue;
 
-    for (const sigObj of signatures) {
-      const signature = sigObj.signature;
-
-      if (processed.has(signature)) continue;
-
-      processed.add(signature);
-
-      const txRes = await axios.post(
-        `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
-        {
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getTransaction",
-          params: [signature, { encoding: "jsonParsed" }]
-        }
+      const transfer = tx.tokenTransfers.find(
+        t => t.mint === TOKEN_MINT
       );
 
-      const tx = txRes.data.result;
-      if (!tx) continue;
+      if (!transfer) continue;
 
-      const postBalances = tx.meta.postTokenBalances || [];
-      const preBalances = tx.meta.preTokenBalances || [];
-
-      const tokenChange = postBalances.find(
-        b => b.mint === TOKEN_MINT
-      );
-
-      if (!tokenChange) continue;
-
-      const owner = tokenChange.owner;
-      const postAmount = Number(tokenChange.uiTokenAmount.uiAmount || 0);
-
-      const preBalanceObj = preBalances.find(
-        b => b.owner === owner && b.mint === TOKEN_MINT
-      );
-
-      const preAmount = preBalanceObj
-        ? Number(preBalanceObj.uiTokenAmount.uiAmount || 0)
-        : 0;
-
-      const tokenBought = postAmount - preAmount;
-
-      if (tokenBought <= 0) continue;
+      if (transfer.tokenAmount <= 0) continue;
 
       await axios.post(DISCORD_WEBHOOK, {
         content:
           `🚀 BUY DETECTED\n\n` +
-          `Tokens Bought: ${tokenBought}\n\n` +
-          `Tx: https://solscan.io/tx/${signature}`
+          `Buyer: ${transfer.toUserAccount}\n` +
+          `Tokens: ${transfer.tokenAmount}\n` +
+          `Tx: https://solscan.io/tx/${tx.signature}`
       });
 
-      console.log("Posted Buy:", tokenBought);
+      console.log("Posted buy:", transfer.tokenAmount);
     }
 
+    res.status(200).send("OK");
   } catch (err) {
     console.log("Error:", err.message);
+    res.status(500).send("Error");
   }
-}
+});
 
-setInterval(scanProgram, 4000);
+app.listen(3000, () => {
+  console.log("Server listening on port 3000");
+});
