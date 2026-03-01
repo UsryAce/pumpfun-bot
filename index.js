@@ -4,12 +4,14 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
 const TOKEN_MINT = process.env.TOKEN_MINT;
 
-console.log("🚀 Pump.fun Bot Started (Mint Tracking)");
+const PUMP_FUN_PROGRAM = "FK4DHfaBsYZnznVnZcNjFmJYmwHuw1tNmjMCmHrNpump";
 
-let lastSignature = null;
+console.log("🚀 Pump.fun Bot Started (Program Scanner)");
 
-async function checkMintActivity() {
-  console.log("Checking mint...");
+let processed = new Set();
+
+async function scanProgram() {
+  console.log("Scanning program...");
 
   try {
     const sigRes = await axios.post(
@@ -18,67 +20,70 @@ async function checkMintActivity() {
         jsonrpc: "2.0",
         id: 1,
         method: "getSignaturesForAddress",
-        params: [TOKEN_MINT, { limit: 5 }]
+        params: [PUMP_FUN_PROGRAM, { limit: 20 }]
       }
     );
 
     const signatures = sigRes.data.result;
     if (!signatures.length) return;
 
-    const latest = signatures[0];
-    if (latest.signature === lastSignature) return;
+    for (const sigObj of signatures) {
+      const signature = sigObj.signature;
 
-    lastSignature = latest.signature;
+      if (processed.has(signature)) continue;
 
-    const txRes = await axios.post(
-      `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
-      {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getTransaction",
-        params: [latest.signature, { encoding: "jsonParsed" }]
-      }
-    );
+      processed.add(signature);
 
-    const tx = txRes.data.result;
-    if (!tx) return;
+      const txRes = await axios.post(
+        `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getTransaction",
+          params: [signature, { encoding: "jsonParsed" }]
+        }
+      );
 
-    const postBalances = tx.meta.postTokenBalances || [];
-    const preBalances = tx.meta.preTokenBalances || [];
+      const tx = txRes.data.result;
+      if (!tx) continue;
 
-    const tokenChange = postBalances.find(
-      b => b.mint === TOKEN_MINT
-    );
+      const postBalances = tx.meta.postTokenBalances || [];
+      const preBalances = tx.meta.preTokenBalances || [];
 
-    if (!tokenChange) return;
+      const tokenChange = postBalances.find(
+        b => b.mint === TOKEN_MINT
+      );
 
-    const owner = tokenChange.owner;
-    const postAmount = Number(tokenChange.uiTokenAmount.uiAmount || 0);
+      if (!tokenChange) continue;
 
-    const preBalanceObj = preBalances.find(
-      b => b.owner === owner && b.mint === TOKEN_MINT
-    );
+      const owner = tokenChange.owner;
+      const postAmount = Number(tokenChange.uiTokenAmount.uiAmount || 0);
 
-    const preAmount = preBalanceObj
-      ? Number(preBalanceObj.uiTokenAmount.uiAmount || 0)
-      : 0;
+      const preBalanceObj = preBalances.find(
+        b => b.owner === owner && b.mint === TOKEN_MINT
+      );
 
-    const tokenBought = postAmount - preAmount;
+      const preAmount = preBalanceObj
+        ? Number(preBalanceObj.uiTokenAmount.uiAmount || 0)
+        : 0;
 
-    if (tokenBought <= 0) return;
+      const tokenBought = postAmount - preAmount;
 
-    await axios.post(DISCORD_WEBHOOK, {
-      content:
-        `🚀 BUY DETECTED\n\n` +
-        `Tokens Bought: ${tokenBought}\n\n` +
-        `Tx: https://solscan.io/tx/${latest.signature}`
-    });
+      if (tokenBought <= 0) continue;
 
-    console.log("Posted Buy:", tokenBought);
+      await axios.post(DISCORD_WEBHOOK, {
+        content:
+          `🚀 BUY DETECTED\n\n` +
+          `Tokens Bought: ${tokenBought}\n\n` +
+          `Tx: https://solscan.io/tx/${signature}`
+      });
+
+      console.log("Posted Buy:", tokenBought);
+    }
 
   } catch (err) {
     console.log("Error:", err.message);
   }
 }
 
-setInterval(checkMintActivity, 3000);
+setInterval(scanProgram, 4000);
