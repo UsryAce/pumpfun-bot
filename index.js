@@ -4,55 +4,75 @@ import axios from "axios";
 const app = express();
 app.use(express.json());
 
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
-const TOKEN_MINT = process.env.TOKEN_MINT;
+const RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
-console.log("🚀 Pump.fun Webhook Bot Running");
-
-// Health check route
-app.get("/", (req, res) => {
-  res.send("Bot is running");
-});
-
-// Webhook route
-app.post("/webhook", async (req, res) => {
-  console.log("Webhook received");
-
+// Get Top 10 holders
+async function getTopHolders() {
   try {
-    const transactions = req.body;
+    const res = await axios.post(RPC, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTokenLargestAccounts",
+      params: [process.env.TOKEN_MINT]
+    });
 
-    for (const tx of transactions) {
-      if (!tx.tokenTransfers) continue;
+    return res.data.result.value
+      .slice(0, 10)
+      .map((h, i) =>
+        `#${i + 1} ${h.address.slice(0, 4)}...${h.address.slice(-4)} — ${h.uiAmount.toLocaleString()}`
+      )
+      .join("\n");
+  } catch {
+    return "Unavailable";
+  }
+}
 
-      const transfer = tx.tokenTransfers.find(
-        t => t.mint === TOKEN_MINT
-      );
+app.post("/webhook", async (req, res) => {
+  try {
+    const tx = req.body[0];
+    if (!tx) return res.sendStatus(200);
 
-      if (!transfer) continue;
+    const transfer = tx.tokenTransfers?.find(
+      t => t.mint === process.env.TOKEN_MINT
+    );
+    if (!transfer) return res.sendStatus(200);
 
-      if (transfer.tokenAmount <= 0) continue;
+    const sol = (tx.nativeTransfers?.[0]?.amount || 0) / 1e9;
 
-      await axios.post(DISCORD_WEBHOOK, {
-        content:
-          `🚀 BUY DETECTED\n\n` +
-          `Buyer: ${transfer.toUserAccount}\n` +
-          `Tokens: ${transfer.tokenAmount}\n` +
-          `Tx: https://solscan.io/tx/${tx.signature}`
-      });
-
-      console.log("Posted buy:", transfer.tokenAmount);
+    // Ignore small buys
+    if (sol < parseFloat(process.env.MIN_SOL)) {
+      return res.sendStatus(200);
     }
 
-    res.status(200).send("OK");
+    const buyer = transfer.toUserAccount;
+    const tokens = transfer.tokenAmount;
+    const signature = tx.signature;
+
+    const holders = await getTopHolders();
+
+    await axios.post(process.env.DISCORD_WEBHOOK, {
+      embeds: [{
+        title: "🚀 BUY DETECTED",
+        color: 0xFFD700,
+        fields: [
+          { name: "Buyer", value: `${buyer.slice(0,4)}...${buyer.slice(-4)}`, inline: true },
+          { name: "Amount", value: `${sol.toFixed(2)} SOL`, inline: true },
+          { name: "Tokens", value: tokens.toLocaleString(), inline: true },
+          { name: "Transaction", value: `https://solscan.io/tx/${signature}` },
+          { name: "🏆 Top 10 Holders", value: holders }
+        ],
+        timestamp: new Date()
+      }]
+    });
+
+    res.sendStatus(200);
+
   } catch (err) {
     console.log("Error:", err.message);
-    res.status(500).send("Error");
+    res.sendStatus(500);
   }
 });
 
-// IMPORTANT: bind to Railway port
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Bot running...");
 });
