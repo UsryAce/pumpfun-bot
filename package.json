@@ -1,0 +1,14 @@
+{
+  "name": "pumpfun-bot",
+  "version": "1.0.0",
+  "description": "Pumpfun Live Buy Tracker",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "ws": "^8.14.2"
+  }
+}
