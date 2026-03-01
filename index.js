@@ -4,13 +4,11 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
 const TOKEN_MINT = process.env.TOKEN_MINT;
 
-const PUMP_FUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
-
-console.log("🚀 Pump.fun Bot Started (Program Tracking)");
+console.log("🚀 Pump.fun Bot Started (Mint Tracking)");
 
 let lastSignature = null;
 
-async function checkPumpFun() {
+async function checkMintActivity() {
   try {
     const sigRes = await axios.post(
       `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
@@ -18,7 +16,7 @@ async function checkPumpFun() {
         jsonrpc: "2.0",
         id: 1,
         method: "getSignaturesForAddress",
-        params: [PUMP_FUN_PROGRAM, { limit: 5 }]
+        params: [TOKEN_MINT, { limit: 5 }]
       }
     );
 
@@ -43,31 +41,42 @@ async function checkPumpFun() {
     const tx = txRes.data.result;
     if (!tx) return;
 
-    const tokenChanges = tx.meta.postTokenBalances || [];
+    const postTokenBalances = tx.meta.postTokenBalances || [];
+    const preTokenBalances = tx.meta.preTokenBalances || [];
 
-    const isOurToken = tokenChanges.some(
-      t => t.mint === TOKEN_MINT
+    const tokenChange = postTokenBalances.find(
+      b => b.mint === TOKEN_MINT
     );
 
-    if (!isOurToken) return;
+    if (!tokenChange) return;
 
-    const solChange =
-      (tx.meta.preBalances[0] - tx.meta.postBalances[0]) / 1e9;
+    const owner = tokenChange.owner;
+    const postAmount = parseFloat(tokenChange.uiTokenAmount.uiAmount || 0);
 
-    if (solChange <= 0) return;
+    const preBalanceObj = preTokenBalances.find(
+      b => b.owner === owner && b.mint === TOKEN_MINT
+    );
+
+    const preAmount = preBalanceObj
+      ? parseFloat(preBalanceObj.uiTokenAmount.uiAmount || 0)
+      : 0;
+
+    const tokenBought = postAmount - preAmount;
+
+    if (tokenBought <= 0) return;
 
     await axios.post(DISCORD_WEBHOOK, {
       content:
         `🚀 BUY DETECTED\n\n` +
-        `SOL Spent: ${solChange}\n\n` +
+        `Tokens Bought: ${tokenBought}\n\n` +
         `Tx: https://solscan.io/tx/${latest.signature}`
     });
 
-    console.log("Posted Pump.fun Buy:", solChange);
+    console.log("Posted Buy:", tokenBought);
 
   } catch (err) {
     console.log("Error:", err.message);
   }
 }
 
-setInterval(checkPumpFun, 3000);
+setInterval(checkMintActivity, 3000);
