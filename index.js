@@ -1,4 +1,4 @@
-import axios from "axios";
+const axios = require("axios");
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
@@ -9,6 +9,8 @@ console.log("🚀 Pump.fun Bot Started (Mint Tracking)");
 let lastSignature = null;
 
 async function checkMintActivity() {
+  console.log("Checking mint...");
+
   try {
     const sigRes = await axios.post(
       `https://rpc.helius.xyz/?api-key=${HELIUS_API_KEY}`,
@@ -41,10 +43,10 @@ async function checkMintActivity() {
     const tx = txRes.data.result;
     if (!tx) return;
 
-    const postTokenBalances = tx.meta.postTokenBalances || [];
-    const preTokenBalances = tx.meta.preTokenBalances || [];
+    const postBalances = tx.meta.postTokenBalances || [];
+    const preBalances = tx.meta.preTokenBalances || [];
 
-    const tokenChange = postTokenBalances.find(
+    const tokenChange = postBalances.find(
       b => b.mint === TOKEN_MINT
     );
 
@@ -53,7 +55,7 @@ async function checkMintActivity() {
     const owner = tokenChange.owner;
     const postAmount = parseFloat(tokenChange.uiTokenAmount.uiAmount || 0);
 
-    const preBalanceObj = preTokenBalances.find(
+    const preBalanceObj = preBalances.find(
       b => b.owner === owner && b.mint === TOKEN_MINT
     );
 
