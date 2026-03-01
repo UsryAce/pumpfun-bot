@@ -9,7 +9,15 @@ const TOKEN_MINT = process.env.TOKEN_MINT;
 
 console.log("🚀 Pump.fun Webhook Bot Running");
 
+// Health check route
+app.get("/", (req, res) => {
+  res.send("Bot is running");
+});
+
+// Webhook route
 app.post("/webhook", async (req, res) => {
+  console.log("Webhook received");
+
   try {
     const transactions = req.body;
 
@@ -42,6 +50,9 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log("Server listening on port 3000");
+// IMPORTANT: bind to Railway port
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
