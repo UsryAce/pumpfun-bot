@@ -7,6 +7,35 @@ app.use(express.json());
 const RPC = `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
 
 // ==========================
+// Whale Tier Logic
+// ==========================
+function getWhaleTier(sol) {
+  if (sol >= 10) return "🐳 MEGA WHALE";
+  if (sol >= 5) return "🐋 WHALE";
+  if (sol >= 1) return "🐬 DOLPHIN";
+  if (sol >= 0.5) return "🐟 FISH";
+  return "🦐 SHRIMP";
+}
+
+// ==========================
+// Get Total Supply
+// ==========================
+async function getTotalSupply() {
+  try {
+    const res = await axios.post(RPC, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getTokenSupply",
+      params: [process.env.TOKEN_MINT]
+    });
+
+    return res.data.result.value.uiAmount;
+  } catch {
+    return 0;
+  }
+}
+
+// ==========================
 // Get Top 10 Holders
 // ==========================
 async function getTopHolders() {
@@ -21,25 +50,23 @@ async function getTopHolders() {
     return res.data.result.value
       .slice(0, 10)
       .map((h, i) =>
-        `#${i + 1} ${h.address.slice(0, 4)}...${h.address.slice(-4)} — ${h.uiAmount.toLocaleString()}`
+        `#${i + 1} ${h.address.slice(0,4)}...${h.address.slice(-4)}`
       )
       .join("\n");
 
-  } catch (err) {
-    console.log("Holder error:", err.message);
+  } catch {
     return "Unavailable";
   }
 }
 
 // ==========================
-// Webhook Endpoint
+// Webhook
 // ==========================
 app.post("/webhook", async (req, res) => {
   try {
     const tx = req.body[0];
     if (!tx) return res.sendStatus(200);
 
-    // Find transfer of our token
     const transfer = tx.tokenTransfers?.find(
       t => t.mint === process.env.TOKEN_MINT
     );
@@ -50,9 +77,7 @@ app.post("/webhook", async (req, res) => {
     const tokens = transfer.tokenAmount;
     const signature = tx.signature;
 
-    // ==========================
-    // CORRECT SOL CALCULATION
-    // ==========================
+    // ===== SOL CALCULATION =====
     let sol = 0;
 
     if (tx.nativeTransfers && tx.nativeTransfers.length > 0) {
@@ -65,19 +90,22 @@ app.post("/webhook", async (req, res) => {
       }
     }
 
-    // Ignore small buys
     if (sol < parseFloat(process.env.MIN_SOL)) {
       return res.sendStatus(200);
     }
 
+    const whaleTier = getWhaleTier(sol);
+
+    // ===== MARKET CAP =====
+    const totalSupply = await getTotalSupply();
+    const pricePerToken = sol / tokens;
+    const marketCap = totalSupply * pricePerToken;
+
     const holders = await getTopHolders();
 
-    // ==========================
-    // Discord Embed
-    // ==========================
     await axios.post(process.env.DISCORD_WEBHOOK, {
       embeds: [{
-        title: "🚀 BUY DETECTED",
+        title: `🚀 BUY DETECTED — ${whaleTier}`,
         color: 0xFFD700,
         fields: [
           {
@@ -87,12 +115,17 @@ app.post("/webhook", async (req, res) => {
           },
           {
             name: "Amount",
-            value: `${sol.toFixed(3)} SOL`,
+            value: `${sol.toFixed(2)} SOL`,
             inline: true
           },
           {
             name: "Tokens",
             value: tokens.toLocaleString(),
+            inline: true
+          },
+          {
+            name: "Market Cap",
+            value: `$${Math.round(marketCap).toLocaleString()}`,
             inline: true
           },
           {
